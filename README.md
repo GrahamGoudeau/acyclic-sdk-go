@@ -57,7 +57,7 @@ out, err := acyclic.RunAgent(ctx, acyclic.AgentOptions{
 		Model: "deepseek/deepseek-v4.1-flash-1017",
 	}),
 	DataPolicy: acyclic.Synthetic, // sandbox hosts only; real patient data needs acyclic.BAA
-	Prompt:     "Select Samuel Okafor and summarize his active problems and latest HbA1c.",
+	Prompt:     "Select Samuel Okafor (born 1948-11-19) and summarize his active problems and latest HbA1c.",
 })
 if err != nil {
 	log.Fatal(err)
