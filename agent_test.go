@@ -71,7 +71,7 @@ func TestAgentToolCallsAndDone(t *testing.T) {
 	if got := strings.Join(events, ","); got != "model_request,model_response,tool_call,tool_result,tool_call,tool_result,model_request,model_response,done" {
 		t.Fatal(got)
 	}
-	if model.reqs[0].MaxTokens != 1024 || len(model.reqs[0].Tools) == 0 {
+	if model.reqs[0].MaxTokens != 4096 || len(model.reqs[0].Tools) == 0 {
 		t.Fatal("request shape")
 	}
 	saved, _ := store.Load(context.Background(), "conv-1")

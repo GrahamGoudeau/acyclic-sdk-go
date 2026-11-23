@@ -149,7 +149,7 @@ Other safeguards:
 
 - A session is bound to one patient. Results belonging to another patient are dropped, and `read_document` refuses another patient's note.
 - Writes are off by default and each one needs `Approve` to return true. The default prompt tells the model not to retry a declined write.
-- Budgets: `MaxSteps` 8, `MaxToolCalls` 20, `MaxTokens` 30000 total, `MaxOutputTokens` 1024 per call. `out.Stop` is `done`, `max_steps`, `max_tokens`, `max_tool_calls` or `output_truncated` (the last reply hit the output cap).
+- Budgets: `MaxSteps` 8, `MaxToolCalls` 20, `MaxTokens` 60000 total, `MaxOutputTokens` 4096 per call. `out.Stop` is `done`, `max_steps`, `max_tokens`, `max_tool_calls` or `output_truncated` (the last reply hit the output cap).
 - `OnEvent` receives `model_request`, `model_response`, `tool_call`, `tool_result` and `done` events for a UI. Events carry raw data.
 
 ## Telemetry and OpenTelemetry

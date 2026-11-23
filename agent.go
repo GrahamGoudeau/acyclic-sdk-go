@@ -76,8 +76,8 @@ type AgentOptions struct {
 	Messages []Message
 	// System defaults to DefaultSystem.
 	System string
-	// Budgets: MaxSteps 8, MaxToolCalls 20, MaxTokens 30000 in total,
-	// MaxOutputTokens 1024 per model call.
+	// Budgets: MaxSteps 8, MaxToolCalls 20, MaxTokens 60000 in total,
+	// MaxOutputTokens 4096 per model call (reasoning models spend output tokens on hidden reasoning).
 	MaxSteps        int
 	MaxToolCalls    int
 	MaxTokens       int
@@ -153,8 +153,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (*AgentResult, error) {
 		runID = randomID("run_")
 	}
 	o.Session.setRunIDIfEmpty(runID)
-	maxSteps, maxToolCalls, maxTokens := def(o.MaxSteps, 8), def(o.MaxToolCalls, 20), def(o.MaxTokens, 30000)
-	maxOutput := def(o.MaxOutputTokens, 1024)
+	maxSteps, maxToolCalls, maxTokens := def(o.MaxSteps, 8), def(o.MaxToolCalls, 20), def(o.MaxTokens, 60000)
+	maxOutput := def(o.MaxOutputTokens, 4096)
 	emit := func(e Event) {
 		if o.OnEvent != nil {
 			func() { defer func() { _ = recover() }(); o.OnEvent(e) }()
