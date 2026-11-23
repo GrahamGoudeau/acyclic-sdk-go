@@ -431,7 +431,8 @@ type SearchResult struct {
 	Truncated bool // stopped at limit while more remained
 }
 
-// Search follows Bundle next links (same origin only) until limit resources.
+// Search follows Bundle next links (same origin only) until limit resources,
+// at most 100 pages (then Truncated is true).
 // Entries with search.mode=outcome, OperationOutcomes and resources of other
 // types (_include results) are dropped.
 func (c *FHIRClient) Search(ctx context.Context, resourceType string, params Params, limit int) (*SearchResult, error) {
@@ -440,7 +441,7 @@ func (c *FHIRClient) Search(ctx context.Context, resourceType string, params Par
 	if err != nil {
 		return nil, err
 	}
-	for {
+	for pages := 1; ; pages++ {
 		for _, e := range asArr(page.JSON["entry"]) {
 			r := asMap(get(e, "resource"))
 			if get(e, "search", "mode") == "outcome" || get(r, "resourceType") == "OperationOutcome" {
@@ -457,6 +458,12 @@ func (c *FHIRClient) Search(ctx context.Context, resourceType string, params Par
 				next = str(get(l, "url"))
 				break
 			}
+		}
+		if pages >= maxPages { // a server looping its next link
+			if len(resources) > limit {
+				resources = resources[:max(limit, 0)]
+			}
+			return &SearchResult{Resources: resources, Truncated: true}, nil
 		}
 		if len(resources) >= limit || next == "" {
 			truncated := len(resources) > limit || (len(resources) >= limit && next != "")
@@ -475,16 +482,22 @@ func (c *FHIRClient) Search(ctx context.Context, resourceType string, params Par
 var (
 	reTypeSeg = regexp.MustCompile(`^[A-Z][A-Za-z]+$`)
 	reOpSeg   = regexp.MustCompile(`^\$[a-z-]+$`)
-	reWordSeg = regexp.MustCompile(`^[a-z]+$`)
+	// fixedSegs are path words that are never ids.
+	fixedSegs = map[string]bool{"_history": true, "_search": true, "v1": true, "patients": true, "appointments": true}
 )
 
+// maxPages stops Search when a server loops its next link.
+const maxPages = 100
+
 // template renders "/api/FHIR/R4/Patient/{id}": never ids, never a query.
-// Resource types, $operations and plain lowercase words are kept; anything
-// with a digit, dot or dash may be an id.
+// Resource types, $operations and a few fixed path words are kept; every
+// other segment could be an id, even an all-lowercase one. The base path
+// is kept only for URLs under it.
 func (c *FHIRClient) template(u *url.URL) string {
 	basePath := strings.TrimSuffix(c.base.EscapedPath(), "/")
 	rest := u.EscapedPath()
-	if strings.HasPrefix(rest, basePath) {
+	inBase := strings.HasPrefix(rest, basePath+"/")
+	if inBase {
 		rest = rest[len(basePath):]
 	}
 	var t []string
@@ -492,13 +505,17 @@ func (c *FHIRClient) template(u *url.URL) string {
 		if p == "" {
 			continue
 		}
-		if reTypeSeg.MatchString(p) || reOpSeg.MatchString(p) || reWordSeg.MatchString(p) {
+		if reTypeSeg.MatchString(p) || reOpSeg.MatchString(p) || fixedSegs[p] {
 			t = append(t, p)
 		} else {
 			t = append(t, "{id}")
 		}
 	}
-	return basePath + "/" + strings.Join(t, "/")
+	prefix := ""
+	if inBase {
+		prefix = basePath
+	}
+	return prefix + "/" + strings.Join(t, "/")
 }
 
 func retryAfter(h string) (time.Duration, bool) {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -557,17 +558,17 @@ func createNote(ctx context.Context, s *Session, a map[string]any) (any, error) 
 	if err != nil {
 		return nil, err
 	}
+	title, tok := a["title"].(string)
+	text, xok := a["text"].(string)
+	if !tok || !xok || jsTrim(text) == "" {
+		return nil, toolErr("create_note needs title and text strings", "bad_args")
+	}
 	if !s.opts.AllowWrites {
 		s.tel.log(ctx, "warn", "write.denied", map[string]any{"gen_ai.tool.name": "create_note"})
 		return nil, toolErr("writes are disabled for this session", "writes_disabled")
 	}
 	if s.opts.Approve == nil {
 		return nil, toolErr("writes need an approve callback", "no_approver")
-	}
-	title, tok := a["title"].(string)
-	text, xok := a["text"].(string)
-	if !tok || !xok {
-		return nil, toolErr("create_note needs title and text strings", "bad_args")
 	}
 	summary := "Save note \"" + title + "\" (" + strconv.Itoa(utf16Len(text)) + " chars) to the chart"
 	if !s.opts.Approve(ctx, ApprovalRequest{Tool: "create_note", Args: a, Summary: summary}) {
@@ -717,5 +718,85 @@ func (s *Session) run(ctx context.Context, name string, args map[string]any) (re
 	if h == nil || !available {
 		return nil, toolErr("tool "+name+" is not available", "unknown_tool")
 	}
+	if err := checkArgs(name, args); err != nil {
+		return nil, err
+	}
 	return h(ctx, s, args)
+}
+
+// toolSchemas holds the parsed input_schema of each tool.
+var toolSchemas = func() map[string]struct {
+	Required   []string
+	Properties map[string]struct{ Type string }
+} {
+	out := map[string]struct {
+		Required   []string
+		Properties map[string]struct{ Type string }
+	}{}
+	for _, t := range ToolSpecs {
+		var sch struct {
+			Required   []string                         `json:"required"`
+			Properties map[string]struct{ Type string } `json:"properties"`
+		}
+		_ = json.Unmarshal(t.InputSchema, &sch)
+		out[t.Name] = struct {
+			Required   []string
+			Properties map[string]struct{ Type string }
+		}{sch.Required, sch.Properties}
+	}
+	return out
+}()
+
+// checkArgs enforces the tool's JSON Schema basics: every required key is
+// present and non-empty, string properties are strings, integer properties
+// are integers.
+func checkArgs(name string, args map[string]any) error {
+	sch, ok := toolSchemas[name]
+	if !ok {
+		return nil
+	}
+	if args == nil {
+		return toolErr("arguments must be an object", "bad_args")
+	}
+	for _, k := range sch.Required {
+		if v, present := args[k]; !present || v == nil || v == "" {
+			return toolErr(k+" is required", "bad_args")
+		}
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := args[k]
+		switch sch.Properties[k].Type {
+		case "string":
+			if _, ok := v.(string); !ok {
+				return toolErr(k+" must be a string", "bad_args")
+			}
+		case "integer":
+			if !isInteger(v) {
+				return toolErr(k+" must be an integer", "bad_args")
+			}
+		}
+	}
+	return nil
+}
+
+// isInteger is Number.isInteger for decoded JSON and Go integer types.
+func isInteger(v any) bool {
+	switch x := v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return x == math.Trunc(x) && !math.IsInf(x, 0)
+	case float32:
+		f := float64(x)
+		return f == math.Trunc(f) && !math.IsInf(f, 0)
+	case json.Number:
+		f, err := x.Float64()
+		return err == nil && f == math.Trunc(f) && !math.IsInf(f, 0)
+	}
+	return false
 }

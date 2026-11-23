@@ -231,14 +231,11 @@ func RunAgent(ctx context.Context, o AgentOptions) (*AgentResult, error) {
 			ms.end(err)
 			return fail(err)
 		}
-		finish := reply.FinishReason
-		if finish == "" {
-			finish = "undefined"
+		attrs := map[string]any{"gen_ai.usage.input_tokens": reply.Usage.Input, "gen_ai.usage.output_tokens": reply.Usage.Output}
+		if reply.FinishReason != "" {
+			attrs["gen_ai.response.finish_reasons"] = []string{reply.FinishReason}
 		}
-		ms.setAttributes(map[string]any{
-			"gen_ai.usage.input_tokens": reply.Usage.Input, "gen_ai.usage.output_tokens": reply.Usage.Output,
-			"gen_ai.response.finish_reasons": []string{finish},
-		})
+		ms.setAttributes(attrs)
 		ms.end(nil)
 		usage.Input += reply.Usage.Input
 		usage.Output += reply.Usage.Output

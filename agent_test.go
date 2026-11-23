@@ -174,3 +174,20 @@ func TestAgentDataPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestFinishReasonsOmittedWhenEmpty(t *testing.T) {
+	f := newFakeFHIR(t)
+	var buf bytes.Buffer
+	ehr := connectFake(t, f, "generic", JSONTelemetry(&buf))
+	for _, c := range []struct{ reason, want string }{{"", ""}, {"stop", `"gen_ai.response.finish_reasons":["stop"]`}} {
+		buf.Reset()
+		_, err := RunAgent(context.Background(), AgentOptions{EHR: ehr, Session: NewSession(ehr, SessionOptions{Patient: "p1"}), Model: &fakeModel{replies: []ChatResponse{{Content: "ok", FinishReason: c.reason}}}, DataPolicy: Synthetic, Prompt: "x"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		has := strings.Contains(buf.String(), "gen_ai.response.finish_reasons")
+		if c.want == "" && has || c.want != "" && !strings.Contains(buf.String(), c.want) {
+			t.Fatalf("reason %q: %s", c.reason, buf.String())
+		}
+	}
+}

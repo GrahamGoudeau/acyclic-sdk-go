@@ -309,3 +309,79 @@ func TestBelongsTo(t *testing.T) {
 		}
 	}
 }
+
+func TestURLTemplateLowercaseIDsAndOutsideBase(t *testing.T) {
+	c, _ := NewFHIRClient(FHIRClientConfig{BaseURL: "https://api.platform.athenahealth.com/fhir/r4"})
+	for in, want := range map[string]string{
+		"https://api.platform.athenahealth.com/fhir/r4/Patient/abcdef":                "/fhir/r4/Patient/{id}",
+		"https://api.platform.athenahealth.com/fhir/r4/Patient/p1/_history/2":         "/fhir/r4/Patient/{id}/_history/{id}",
+		"https://api.platform.athenahealth.com/fhir/r4/Observation/_search":           "/fhir/r4/Observation/_search",
+		"https://api.platform.athenahealth.com/v1/195900/patients/60990/appointments": "/v1/{id}/patients/{id}/appointments",
+		"https://api.platform.athenahealth.com/fhir/r4x/Patient":                      "/{id}/{id}/Patient",
+	} {
+		u, _ := url.Parse(in)
+		if got := c.template(u); got != want {
+			t.Errorf("%s -> %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestSearchStopsAfter100Pages(t *testing.T) {
+	f := newFakeFHIR(t)
+	var pages int
+	f.handle = func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.HasSuffix(r.URL.Path, "/Condition") {
+			pages++
+			// A server that loops its next link forever, with empty pages.
+			writeJSONT(w, 200, bundleNext(f.URL+"/fhir/Condition?page=again"))
+			return true
+		}
+		return false
+	}
+	ehr := connectFake(t, f, "generic", nil)
+	out, err := ehr.FHIR.Search(context.Background(), "Condition", Params{"patient": "p1"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages != 100 || !out.Truncated || len(out.Resources) != 0 {
+		t.Fatalf("pages=%d truncated=%v n=%d", pages, out.Truncated, len(out.Resources))
+	}
+}
+
+func TestArgsValidatedAgainstSchema(t *testing.T) {
+	f := newFakeFHIR(t)
+	ehr := connectFake(t, f, "generic", nil)
+	ctx := context.Background()
+	approved := false
+	s := NewSession(ehr, SessionOptions{Patient: "p1", AllowWrites: true, Approve: func(context.Context, ApprovalRequest) bool { approved = true; return true }})
+	before := f.requests.Load()
+	for _, c := range []struct {
+		name string
+		args map[string]any
+		msg  string
+	}{
+		{"get_labs_vitals", map[string]any{"limit": 2.5}, "limit must be an integer"},
+		{"get_labs_vitals", map[string]any{"limit": "20"}, "limit must be an integer"},
+		{"get_labs_vitals", map[string]any{"code": 4548}, "code must be a string"},
+		{"get_labs_vitals", map[string]any{"since": nil}, "since must be a string"},
+		{"read_document", map[string]any{}, "document_id is required"},
+		{"read_document", map[string]any{"document_id": ""}, "document_id is required"},
+		{"read_document", map[string]any{"document_id": 7.0}, "document_id must be a string"},
+		{"create_note", map[string]any{"title": "t"}, "text is required"},
+		{"create_note", map[string]any{"title": "t", "text": "   "}, "create_note needs title and text strings"},
+	} {
+		r := s.Call(ctx, c.name, c.args)
+		if r.OK || r.Code != "bad_args" || r.Error != c.msg {
+			t.Errorf("%s %v: %s", c.name, c.args, r.JSON())
+		}
+	}
+	if approved || f.requests.Load() != before {
+		t.Fatal("invalid args reached approval or the server")
+	}
+	if r := s.Call(ctx, "get_labs_vitals", map[string]any{"limit": 2.0}); !r.OK {
+		t.Fatalf("whole float should pass: %s", r.JSON())
+	}
+	if r := s.Call(ctx, "get_labs_vitals", map[string]any{"limit": 2}); !r.OK {
+		t.Fatalf("Go int should pass: %s", r.JSON())
+	}
+}
